@@ -1,0 +1,9 @@
+{
+  "path": "E:/Music/bass-note.wav",
+  "kind": "sound",
+  "channel": 4,
+  "params": [10],
+  "budget": 20,
+  "pitch": 33,
+  "note_len_s": 0.7
+}

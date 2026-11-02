@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "fl-studio": {
+      "command": "E:/Tools/fl-studio-mcp/fl-studio-mcp.exe",
+      "args": [],
+      "env": {
+        "FLSTUDIO_MCP_DATA": "E:/FL-MCP/data",
+        "TEMP": "E:/FL-MCP/temp",
+        "TMP": "E:/FL-MCP/temp"
+      }
+    }
+  }
+}

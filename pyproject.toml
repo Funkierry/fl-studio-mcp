@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fl-studio-mcp"
+version = "0.6.0"
+description = "MCP server that lets any MCP-capable AI assistant arrange inside a running FL Studio"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "mido>=1.3,<2",
+]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Sound/Audio :: MIDI",
+]
+
+[project.optional-dependencies]
+# Fallback captures the whole system output, not only FL Studio.
+system-loopback = ["soundcard>=0.4"]
+
+[project.urls]
+Repository = "https://github.com/Funkierry/fl-studio-mcp"
+Issues = "https://github.com/Funkierry/fl-studio-mcp/issues"
+
+[project.scripts]
+fl-studio-mcp = "fl_studio_mcp.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+fl_studio_mcp = ["fl/*"]

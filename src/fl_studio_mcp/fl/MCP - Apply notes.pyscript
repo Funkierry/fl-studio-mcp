@@ -1,0 +1,107 @@
+"""
+MCP - Apply notes（钢琴卷帘脚本，由 fl-studio-mcp 安装）
+
+FL 的脚本沙盒不允许读文件，所以 fl-studio-mcp 每次都会重写这个文件，把待写入的音符
+直接嵌在下面的 DATA 里。在钢琴卷帘里运行它：
+  - 有待写入的音符：写进当前钢琴卷帘（相同音高、位置和长度的音符不会重复添加）
+  - 没有：只读取当前卷帘里的音符，交给 Agent（需要和 MIDI 桥脚本共用解释器）
+
+DATA 格式（时间单位：拍 / 四分音符）：
+{"stamp": 1700000000.0, "mode": "merge" | "replace", "label": "...",
+ "notes": [{"pitch": 45, "start": 0.0, "length": 0.5, "velocity": 0.8}, ...]}
+"""
+
+import flpianoroll as flp
+
+import builtins
+import json
+import time
+
+DATA = None  # @@FLAGENT_DATA@@
+
+
+def read_notes():
+    out = []
+    ppq = flp.score.PPQ
+    for i in range(flp.score.noteCount):
+        n = flp.score.getNote(i)
+        out.append({"pitch": n.number, "start": n.time / ppq, "length": n.length / ppq,
+                    "velocity": round(n.velocity, 3), "selected": n.selected})
+    return out
+
+
+def pick_payload():
+    applied = getattr(builtins, "_flagent_applied_stamps", set())
+    # Once a file embeds a payload, never fall back to an older MIDI-side payload,
+    # including when this embedded payload has already been applied.
+    candidates = ([(DATA, "embedded")] if DATA is not None else
+                  [(getattr(builtins, "_flagent_pending", None), "builtins")])
+    candidates = [(p, src) for p, src in candidates if p and p.get("stamp") not in applied]
+    if not candidates:
+        return None, None
+    return max(candidates, key=lambda c: c[0].get("stamp", 0))
+
+
+def _apply_notes(payload, report):
+    ppq = flp.score.PPQ
+    if payload.get("mode") == "replace":
+        flp.score.clearNotes(True)
+    existing = set()
+    for i in range(flp.score.noteCount):
+        n = flp.score.getNote(i)
+        existing.add((n.number, n.time, n.length))
+    added = skipped = 0
+    for spec in payload.get("notes", []):
+        note = flp.Note()
+        note.number = int(spec["pitch"])
+        note.time = int(round(float(spec["start"]) * ppq))
+        note.length = max(1, int(round(float(spec["length"]) * ppq)))
+        note.velocity = max(0.0, min(1.0, float(spec.get("velocity", 0.8))))
+        key = (note.number, note.time, note.length)
+        if key in existing:
+            skipped += 1
+            continue
+        flp.score.addNote(note)
+        existing.add(key)
+        added += 1
+    report.update(added=added, skipped_duplicates=skipped)
+    applied = getattr(builtins, "_flagent_applied_stamps", set())
+    applied.add(payload.get("stamp"))
+    builtins._flagent_applied_stamps = applied
+
+
+def apply(form=None):
+    """FL calls apply() without a dialog, or apply(form) with one.
+
+    Loading the script must not write notes: FL owns the apply lifecycle.
+    """
+    report = {"time": time.strftime("%Y-%m-%d %H:%M:%S"),
+              "shared": hasattr(builtins, "_flagent_midi_alive"),
+              "added": 0, "skipped_duplicates": 0}
+    try:
+        payload, source = pick_payload()
+        report["source"] = source
+        if payload:
+            report["stamp"] = payload.get("stamp")
+            report["label"] = payload.get("label")
+            _apply_notes(payload, report)
+        report["notes"] = read_notes()
+        report["note_count"] = len(report["notes"])
+    except BaseException as e:
+        report["error"] = "%s: %s" % (type(e).__name__, e)
+
+    builtins._flagent_pr_report = report
+    flp.Utils.log("FL MCP REPORT: " + json.dumps(report, ensure_ascii=True))
+    if "error" in report:
+        flp.Utils.ShowMessage("FL Studio MCP error: " + report["error"])
+    elif not report["shared"]:
+        pitches = ", ".join(str(n["pitch"]) for n in report["notes"][:16])
+        if report["note_count"] > 16:
+            pitches += ", ..."
+        flp.Utils.ShowMessage(
+            "FL Studio MCP: added %d, skipped duplicates %d.\nPiano roll: %d notes.\n"
+            "MIDI pitches: %s\nMIDI readback is unavailable in this FL session."
+            % (report["added"], report["skipped_duplicates"], report["note_count"], pitches or "none"))
+    elif not payload:
+        flp.Utils.ShowMessage("FL Studio MCP: no new notes to apply.\nRead %d notes for the assistant."
+                              % report["note_count"])
