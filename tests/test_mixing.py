@@ -96,6 +96,27 @@ class DetailTests(unittest.TestCase):
 
 
 class LiveMixTests(unittest.TestCase):
+    def test_stereo_quantization_is_accepted_but_failed_writes_are_rejected(self):
+        for fail_write in (False, True):
+            session = Mock()
+            session.info.return_value = {'bridge_version':8}
+            value = [0.]
+            session.mixer.side_effect = lambda tracks:{'tracks':[{'stereo_separation':value[0]}]}
+            def write(track, stereo_separation, undo=False):
+                if not fail_write:
+                    value[0] = round(stereo_separation*64)/64
+            session.set_mixer.side_effect = write
+            session.ears.listener.record_playback.side_effect = lambda *args:(fixture(),16000,{'capture':'process'})
+            with tempfile.TemporaryDirectory() as directory:
+                args = (session, fixture(), 16000, Path(directory), [{'track':0,'kind':'stereo','step':.1}])
+                if fail_write:
+                    with self.assertRaisesRegex(FLError, 'readback'):
+                        fit_live(*args, budget=2, seconds=4)
+                else:
+                    report = fit_live(*args, budget=2, seconds=4)
+                    self.assertEqual(report['history'][1]['values'], [-.09375])
+                self.assertEqual(value[0], 0.)
+
     def test_success_keeps_best_readback_and_cancel_restores_original(self):
         for cancel_after in (None, 3):
             session = Mock()

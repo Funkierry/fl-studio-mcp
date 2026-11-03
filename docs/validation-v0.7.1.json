@@ -1,0 +1,133 @@
+{
+  "date": "2026-11-03",
+  "fl_version": "Producer Edition v24.2.1 [build 4526]",
+  "bridge_version": 8,
+  "server_version": "0.7.1",
+  "offline_tests": 92,
+  "packaged_tools": 32,
+  "restart_routing": {
+    "request_input": 10,
+    "reply_output": 10,
+    "unused_same_name_output": 9,
+    "connected_after_restart": true
+  },
+  "song": {
+    "reference_name": "alexgrohl-sad-story-629163.mp3",
+    "reference_duration_s": 126.04,
+    "pipeline_version": "0.7.0 (transcription and DSP unchanged in 0.7.1)",
+    "tempo_bpm": 112.0,
+    "bars": 58.0,
+    "note_counts": {
+      "kick": 204,
+      "snare": 153,
+      "hat": 127,
+      "chords": 90,
+      "bass": 253
+    },
+    "rendered_duration_s": 124.37501133786849,
+    "audio_checks": {
+      "finite_audio": true,
+      "complete_duration": true,
+      "non_silent": true,
+      "no_digital_clipping": true
+    },
+    "mix": {
+      "distance_before": 3.710643741763372,
+      "distance_after": 2.9200249289386147,
+      "true_peak_dbtp": -1.8249806023531256
+    }
+  },
+  "known_volume": {
+    "seconds": 4,
+    "evaluations": 3,
+    "original": 0.6299999998882413,
+    "target": 0.53,
+    "best_readback": 0.5300000002607703,
+    "restored": 0.6299999998882413,
+    "distance_before": 0.6478762640428641,
+    "distance_after": 0.028734816465962452,
+    "capture": "process",
+    "capture_pid_matches_bridge": true
+  },
+  "live_reference_mix": {
+    "distance_before": 4.002015065100299,
+    "distance_after": 3.826252667555371,
+    "best_settings": [
+      {
+        "control": {
+          "track": 0,
+          "kind": "stereo",
+          "min": -0.4,
+          "max": 0.4,
+          "step": 0.1
+        },
+        "value": -0.09375
+      },
+      {
+        "control": {
+          "track": 0,
+          "kind": "eq",
+          "band": 0,
+          "min": 0.35,
+          "max": 0.65,
+          "step": 0.04
+        },
+        "value": 0.5
+      },
+      {
+        "control": {
+          "track": 0,
+          "kind": "eq",
+          "band": 1,
+          "min": 0.35,
+          "max": 0.65,
+          "step": 0.04
+        },
+        "value": 0.46000000834465027
+      },
+      {
+        "control": {
+          "track": 0,
+          "kind": "eq",
+          "band": 2,
+          "min": 0.35,
+          "max": 0.65,
+          "step": 0.04
+        },
+        "value": 0.5
+      },
+      {
+        "control": {
+          "track": 0,
+          "kind": "volume",
+          "min": 0.3,
+          "max": 0.8,
+          "step": 0.04
+        },
+        "value": 0.6299999998882413
+      }
+    ],
+    "actual_readback": [
+      -0.09375,
+      0.5,
+      0.46000000834465027,
+      0.5,
+      0.6299999998882413
+    ],
+    "evaluations": 11,
+    "stereo_candidates": [
+      0.0,
+      -0.09375,
+      0.0
+    ],
+    "reference_start_s": 0.28,
+    "seconds": 6
+  },
+  "limitations": [
+    "Feature distance is not perceptual similarity or note accuracy.",
+    "The reference has no independently annotated note or section ground truth.",
+    "Template instruments approximate the reference; no automatic vocal/lead or original effect-chain recovery.",
+    "Offline full-song mixed WAV and live FL six-second fitting are separate processing paths.",
+    "Reference audio, rendered audio and project files are kept locally, not published."
+  ]
+}

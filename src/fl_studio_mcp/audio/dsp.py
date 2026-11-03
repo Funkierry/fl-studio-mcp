@@ -1,6 +1,7 @@
 """Signal-processing building blocks (numpy + scipy only)."""
 
 import shutil
+import os
 import subprocess
 from functools import lru_cache
 from pathlib import Path
@@ -35,11 +36,14 @@ def load_audio(path, sr=None, mono=False, start=None, end=None):
         file_sr, data = wavfile.read(str(path))
         data = _to_float(data)
     else:
-        ffmpeg = shutil.which("ffmpeg")
+        configured = os.environ.get('FLSTUDIO_MCP_FFMPEG')
+        ffmpeg = str(Path(configured).expanduser()) if configured else shutil.which("ffmpeg")
+        if configured and not Path(ffmpeg).is_file():
+            raise AudioError('FLSTUDIO_MCP_FFMPEG must point to an existing ffmpeg executable')
         if not ffmpeg:
-            raise AudioError(f"{path.suffix} files need ffmpeg on PATH (or convert to WAV first)")
+            raise AudioError(f"{path.suffix} files need ffmpeg on PATH or FLSTUDIO_MCP_FFMPEG (or convert to WAV first)")
         file_sr = sr or 44100
-        proc = subprocess.run([ffmpeg, "-v", "error", "-i", str(path), "-f", "f32le", "-ac", "2", "-ar", str(file_sr), "-"],
+        proc = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(path), "-vn", "-f", "f32le", "-ac", "2", "-ar", str(file_sr), "-"],
                               capture_output=True, check=False)
         if proc.returncode != 0:
             raise AudioError(f"ffmpeg failed: {proc.stderr.decode(errors='replace')[:300]}")

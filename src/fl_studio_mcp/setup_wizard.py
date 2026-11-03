@@ -177,6 +177,31 @@ def _get_string(subkey, name):
         return None
 
 
+def _parking_output_port(dev, out_port, port_number):
+    """Keep the unused same-name output off the reply port, including after restart."""
+    existing = _get_string(f"{dev}\\MIDI output\\{out_port}", "Port")
+    try:
+        if 0 <= int(existing) <= 255 and int(existing) != int(port_number):
+            return int(existing)
+    except (ValueError, TypeError):
+        pass
+    used = {int(port_number)}
+    for direction in ('input', 'output'):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, f"{dev}\\MIDI {direction}") as key:
+                for i in range(winreg.QueryInfoKey(key)[0]):
+                    name = winreg.EnumKey(key, i)
+                    value = _get_string(f"{dev}\\MIDI {direction}\\{name}", 'Port')
+                    try:
+                        used.add(int(value))
+                    except (ValueError, TypeError):
+                        pass
+        except FileNotFoundError:
+            pass
+    candidates = [int(port_number)-1] + list(range(255, -1, -1))
+    return next((p for p in candidates if 0 <= p <= 255 and p not in used), None)
+
+
 def setup_fl_midi(out_port, in_port, port_number, assume_yes):
     keys = fl_version_keys()
     if not keys:
@@ -193,17 +218,21 @@ def setup_fl_midi(out_port, in_port, port_number, assume_yes):
         return False
     for k in keys:
         dev = f"{k}\\Devices"
+        parking = _parking_output_port(dev, out_port, port_number)
+        if parking is None:
+            _say('warn', 'No unused MIDI port is available for the same-name output; settings not changed')
+            return False
         _set_strings(f"{dev}\\MIDI input\\{out_port}", {"Type": "-3", "ScriptFolder": paths.BRIDGE_NAME,
                                                          "IDString": "-", "Port": port_number, "Enabled": "1"})
         _set_strings(f"{dev}\\MIDI input\\{in_port}", {"Type": "0", "ScriptFolder": "", "IDString": "-",
                                                         "Port": "-1", "Enabled": "0"})
         _set_strings(f"{dev}\\MIDI output\\{in_port}", {"Port": port_number, "Sync": "0", "SendAllNotesOff": "1",
                                                          "IDString": "-"})
-        out_existing = _get_string(f"{dev}\\MIDI output\\{out_port}", "Port")
-        if out_existing == str(port_number):
-            _set_strings(f"{dev}\\MIDI output\\{out_port}", {"Port": "-1"})
+        # FL 24 can auto-pair an unassigned same-name output back to the input's
+        # port on restart. An explicit spare port prevents this reply conflict.
+        _set_strings(f"{dev}\\MIDI output\\{out_port}", {"Port": parking, "Sync": "0"})
         _say("do", f"{k.rsplit(chr(92), 1)[1]}: input '{out_port}' → {paths.BRIDGE_NAME} (port {port_number}), "
-                   f"output '{in_port}' → port {port_number}")
+                   f"output '{in_port}' → port {port_number}; unused output '{out_port}' → spare port {parking}")
     return True
 
 

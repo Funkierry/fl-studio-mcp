@@ -106,7 +106,10 @@ def fit_live(session, reference, sr, output, controls=None, budget=12, seconds=8
             changed = True  # a timeout may occur after FL applied the command
             apply_control(session, c, candidate[i], undo=evaluation == 1)
             actual = _finite_number(read_control(session, c), 'readback')
-            if abs(actual-candidate[i]) > .002:
+            # FL 24 rounds stereo separation onto a 1/64 grid. Other controls
+            # retain strict readback; do not hide a failed write by widening all tolerances.
+            expected = round(candidate[i]*64)/64 if c['kind'] == 'stereo' else candidate[i]
+            if abs(actual-expected) > .002 or not c['min'] <= actual <= c['max']:
                 raise FLError('FL mixer readback did not match requested value')
             candidate[i] = actual
             time.sleep(.1)

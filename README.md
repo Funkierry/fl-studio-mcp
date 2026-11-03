@@ -3,14 +3,14 @@
 **用自然语言操作 FL Studio，并把参考音频转换成可编辑工程，或在现有插件中搜索接近的音色。**
 
 [![Windows tests](https://github.com/Funkierry/fl-studio-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/Funkierry/fl-studio-mcp/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-0.7.0-blue)](https://github.com/Funkierry/fl-studio-mcp/releases/tag/v0.7.0)
+[![Version](https://img.shields.io/badge/version-0.7.1-blue)](https://github.com/Funkierry/fl-studio-mcp/releases/tag/v0.7.1)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [下载 Windows EXE](https://github.com/Funkierry/fl-studio-mcp/releases/latest) · [参数示例](examples/) · [报告问题](https://github.com/Funkierry/fl-studio-mcp/issues)
 
 FL Studio MCP 是运行在本机的 Model Context Protocol（MCP）服务器。支持 MCP 的 AI 客户端负责理解你的话，再通过本项目读取工程、写鼓点、控制插件、录制试听并分析结果。它本身不需要模型 API Key，也不内置大语言模型。
 
-当前版本 **0.7.0** 提供 **32 个工具**。支持逐段演奏细节保留、参考音频混音，以及实际 FL 混音器参数搜索。完整还原与混音任务使用独立后台进程，工具连接关闭后仍可继续运行；重连后可查询进度和结果。
+当前版本 **0.7.1** 提供 **32 个工具**。支持逐段演奏细节保留、参考音频混音，以及实际 FL 混音器参数搜索。完整还原与混音任务使用独立后台进程，工具连接关闭后仍可继续运行；重连后可查询进度和结果。
 
 > **当前“整曲还原”的含义**：根据参考音频，近似重建 4/4 拍音乐的鼓、三和弦、低音和段落，再通过你准备的乐器模板生成 FLP、MIDI 和 WAV。当前不包含人声分离、独立主旋律转录、逐轨音色自动匹配或一比一成品复刻。
 
@@ -67,7 +67,7 @@ FL Studio MCP 是运行在本机的 Model Context Protocol（MCP）服务器。�
 | AI 客户端 | 支持 MCP stdio；也提供本地 HTTP 接口。不同客户端的工具审批和配置入口由客户端决定 |
 | Python | EXE 用户不需要安装；源码要求 Python 3.10+，CI 覆盖 3.10 与 3.12 |
 | Python 依赖 | NumPy、SciPy、Mido；EXE 构建时包含运行依赖 |
-| 音频格式 | WAV 可直接读取；MP3 等其他格式需要 `ffmpeg` 在系统 `PATH` 中 |
+| 音频格式 | WAV 可直接读取；MP3 等其他格式需要 `ffmpeg` 在 `PATH` 中，或通过 `FLSTUDIO_MCP_FFMPEG` 指定其完整路径 |
 | 乐器与采样 | 使用你本机已安装的插件、预设和采样；本项目不包含 FL 安装程序、商业音源或插件授权 |
 
 实时录音优先使用 **WASAPI 进程回环**，捕获 `FL64.exe` 及其子进程的输出。Microsoft 的参考实现要求 Windows build 20348 或更高，因此这里不承诺所有 Windows 10 版本都支持该路径。[Microsoft 文档](https://learn.microsoft.com/en-us/samples/microsoft/windows-classic-samples/applicationloopbackaudio-sample/)
@@ -99,7 +99,7 @@ Set-Location E:\Tools\fl-studio-mcp
 .\fl-studio-mcp.exe doctor --json
 ```
 
-正常状态应显示服务器版本 `0.7.0`、桥接版本 `8`、`connection.state = connected`。升级 EXE 后请再次运行 `install`，并在 FL 中更新 MIDI 脚本。FL 未打开时，离线分析与离线混音仍可用，但实时诊断会报告未连接。
+正常状态应显示服务器版本 `0.7.1`、桥接版本 `8`、`connection.state = connected`。升级 EXE 后请再次运行 `install`，并在 FL 中重载脚本或重启 FL；仅“更新 MIDI 脚本”可能仍保留旧脚本缓存。`fl.process_id` 应返回实际回复的 FL 进程号，用于定向录音。FL 未打开时，离线分析与离线混音仍可用，但实时诊断会报告未连接。
 
 其他安装选项：
 
@@ -158,6 +158,8 @@ python -m venv .venv
 
 先创建所用目录。`FLSTUDIO_MCP_DATA` 保存任务状态、分析、录音及模板快照；`TEMP`/`TMP` 控制临时目录。**AI 客户端启动的进程不一定继承你某个 PowerShell 窗口的环境变量**，需要在客户端配置中填写这些值。
 
+若使用 MP3/FLAC，可在上述 `env` 内增加 `"FLSTUDIO_MCP_FFMPEG": "E:/Tools/ffmpeg/ffmpeg.exe"`，路径应指向本机已安装的 FFmpeg。此变量优先于 `PATH`，路径无效会明确报错。发布包不捆绑 FFmpeg；音频在本机解码，不上传到服务端。
+
 Codex 的 TOML 配置可写成：
 
 ```toml
@@ -181,9 +183,11 @@ TMP = "E:/FL-MCP/temp"
 | 输入 | `FL Agent` | 启用，控制器选 `FL Studio MCP Bridge` | `10` |
 | 输入 | `FL Agent Reply` | 禁用 | 不用分配 |
 | 输出 | `FL Agent Reply` | 作为回复输出 | `10` |
-| 输出 | `FL Agent` | 不分配输出路由 | `---` |
+| 输出 | `FL Agent` | 使用单独的空闲端口，不向其发送音符 | 例如 `9` |
 
 **输出列表中只能有 `FL Agent Reply` 使用端口 10。** 两个输出都设为 10，可能把回复送回请求端口，表现为超时或脚本似乎没有响应。输入与输出中的 `FL Agent` 是不同设置，不要把输入端也关掉。
+
+FL 24 实机测试发现：将同名输出设为 `---`，重启时可能被自动配回输入使用的端口 10。0.7.1 的 `setup` 改为给该输出保留一个独立空闲端口，避开其他设备已占用的输入/输出端口，并保留已有的独立端口。手动配置时也应选择空闲号；`9` 只是此测试环境的示例。
 
 默认脚本安装位置位于 FL 用户数据目录：
 
@@ -635,7 +639,7 @@ FL 的实时脚本接口不能覆盖所有播放列表和音符编辑需求，�
 | `waiting_fl_close` | 保存并关闭原有 FL，再用同一任务编号 `resume=true`；若 FL 窗口已关闭但进程还在，应先检查任务管理器 |
 | 模板验证失败 | 使用 FL 24；五个角色对应不同 Pattern 和通道，每个含音符；片段未裁切、同一 Arrangement，且无 Pattern 自动化 |
 | 输出静音或渲染失败 | 手动打开生成的 FLP，检查插件/采样是否缺失、音源是否发声及导出对话框；查看 `worker.log` 与 `render.log` |
-| MP3 读取失败 | 确认 `ffmpeg -version` 可执行，或先转成 WAV |
+| MP3 读取失败 | 配置 `FLSTUDIO_MCP_FFMPEG` 的完整路径，或确认 MCP 进程的 `PATH` 包含 FFmpeg；也可先转成 WAV |
 | NCM 读取失败 | NCM 是播放器加密格式，不能仅改扩展名；请提供可读取的 WAV、FLAC 或 MP3 导出。程序不会修改原文件 |
 | 无法录制 FL 声音 | 检查系统是否支持进程回环、FL 是否确实发声；可选系统回环会混入其他应用，必须单独判断录音来源 |
 | 速度变成一半/两倍 | 显式传入正确的 `tempo_hint`；复杂混音可能出现节拍层级歧义 |
@@ -739,9 +743,17 @@ python scripts/build_exe.py --dist-dir E:\FL-MCP\release --work-dir E:\FL-MCP\bu
 
 离线自动测试覆盖已知 EQ/音量/声像偏差的改善、同参考不劣化、反相立体声、过采样峰值、DSP 重放、细节保留、Pop 独立标准答案、实时写入失败/取消恢复、持久化混音 worker。CI 的模拟 FL 测试不替代实机验证。
 
-本次 **85 项离线测试**在两组依赖环境中通过；发布 EXE 的 stdio 初始化报告 0.7.0、32 个工具。关闭提交请求的父 EXE 后，独立混音 worker 仍完成任务；新版整曲文件导出也生成了 40 小节、814 音符的 FLP/MIDI，文件内音符计数与分析一致。
+0.7.0 发布时的 **85 项离线测试**在两组依赖环境中通过；当时 EXE 的 stdio 初始化报告 0.7.0、32 个工具。关闭提交请求的父 EXE 后，独立混音 worker 仍完成任务；新版整曲文件导出也生成了 40 小节、814 音符的 FLP/MIDI，文件内音符计数与分析一致。
 
-**0.7.0 实时混音暂列实验功能**：模拟 FL 的成功、异常和取消恢复测试已通过；开发机此次实际 FL 连接被重复 MIDI 输出端口配置阻断，尚未完成新版实时混音或新版工程原生渲染验证。下面的 0.6.0 实机结果不替代这项验证。实时混音拒绝系统全局录音回退，以避免其他播放器声音参与评分。
+**0.7.1 补充实机验证**：修复了重启后 MIDI 输出重新冲突的问题，以及 FL 24 立体声宽度按 `1/64` 取整造成的误报。音量、声像和 EQ 仍采用严格回读校验；立体声宽度按实际量化值检查，结果保留实际回读值，超出用户指定范围仍报错并恢复。新增回归用例后共 **92 项离线测试通过**。
+
+使用本机 `alexgrohl-sad-story-629163.mp3`（126.04 秒）完成整曲流程：估计 112 BPM，生成 58 小节、827 个音符的五声部 FLP/MIDI；FL 24 原生输出 124.375 秒 WAV，有限数值、完整时长、非静音及无数字削波检查通过。参考混音的综合特征距离 **3.711 → 2.920**，4 倍过采样峰值约 **−1.825 dBTP**。生成的工程可在 FL 打开，混音 WAV、处理配方与 A/B 对比已写入本地输出目录。原始歌曲与生成音频不随仓库发布。
+
+另用已知目标做真实闭环：在同一工程把主音量从 0.63 降为 0.53，录下 4 秒参考，再恢复至 0.63；独立 EXE 的 `fl_match_mix` 经过 3 次评估找回 **0.53**，特征距离 **0.648 → 0.029**。录音进程号与桥接返回的 FL 进程号相同；音量、声像、立体声宽度和 EQ 写入后均实际回读，测试结束后原值已恢复。
+
+0.7.1 打包 EXE 又直接读取同一 MP3，用对齐后的开头 6 秒做 11 次真实 FL 混音评估：特征距离 **4.002 → 3.826**，保留宽度 `−0.09375` 与中段 EQ 归一化增益 `0.46`，全部最佳参数经过回读确认。此结果仅代表该片段；完整 `mixed.wav` 则来自上面的离线全曲处理，两者不是同一混音链。FL 再次重启后端口 9/10 仍保留，桥接 v8 与服务器 0.7.1 的诊断通过。数值摘要见 [实机验证记录](docs/validation-v0.7.1.json)。
+
+这些结果证明流程与部分参数搜索可工作，**不是原曲听感或音符准确率**。此次仍使用 808 鼓、FLEX Bass 和合成和弦模板，没有自动复原参考曲的真实乐器、独立旋律或原始效果链；自动段落标签也不能作为人工结构标注。实时混音仍属实验功能，拒绝系统全局录音回退，以避免其他播放器声音参与评分。
 
 以下为 0.6.0 已完成的 FL Studio 24.2.1 集成验证历史，保留用于区分新算法测试与旧版实机结果：
 
