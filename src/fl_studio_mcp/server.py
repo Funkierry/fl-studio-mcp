@@ -42,11 +42,17 @@ Listening (you can hear FL's actual output)
   and tell the user what changed (A/B). Measurements without a reference use rules of thumb — say so.
 - Whole-file reconstruction: prefer fl_recreate_music(path, kind="song") after fl_recreation_config is configured.
   It creates a new editable FLP with instruments and playlist, MIDI, native FL WAV, verification and A/B audio.
+  reference_mix=true also creates mixed.wav and mix-report.json; offline DSP is not embedded in the FLP.
   Poll fl_recreation_status; the task survives disconnects. If waiting_fl_close, save and close FL then resume=true.
   Never report a task complete unless its status is done. render=false deliberately skips audio rendering.
   Use fl_recreate_music(kind="sound", channel=...) for persistent live plugin matching; FL must stay open for this.
   The current whole-song engine assumes 4/4 and rebuilds drums/chords/bass, not vocals or independent leads.
   Template instruments approximate the source; a finished workflow is not a claim of 1:1 musical similarity.
+- Reference mixing: fl_match_mix(reference_path, source_path) processes an existing rendered audio file.
+  Omit source_path to optimize actual FL mixer controls; inspect fl_get_mixer/fl_list_params first.
+  Live matching needs bridge v8, a matching excerpt, and no concurrent playback/parameter edits.
+  Poll fl_recreation_status; before/best/reference audio and exact mixer-revert.json are saved.
+  On cancellation/error live mixing restores the original values; successful best settings remain applied.
 - For incremental rebuilding inside an already-open project: fl_analyze_audio(path) → summarize tempo/key/sections/chords → confirm the channel mapping
   (drums, a chord instrument, a bass instrument) → fl_plan_rebuild → fl_rebuild_song → fl_rebuild_next.
   After applying and verifying each piano-roll script, acknowledge with fl_rebuild_next(applied=true).
@@ -81,6 +87,23 @@ def _obj(props=None, required=()):
 
 
 TOOLS = [
+    ('fl_match_mix', 'Persistent reference mix matching. With source_path: process an existing audio file using bounded EQ, '
+     'compression, stereo width/balance, optional synthetic ambience and a -1 dBTP peak guard. Without source_path: '
+     'capture FL playback and optimize existing mixer/FX controls; bridge v8 required. Returns task_id; poll fl_recreation_status. '
+     'Live best settings stay applied; errors/cancellation restore the original, with a durable mixer-revert.json. '
+     'Use the same musical excerpt in reference and playback. Offline DSP is not embedded into FLP.',
+     _obj({'reference_path': {'type':'string'}, 'source_path': {'type':'string'}, 'output_dir': {'type':'string'},
+           'start': {'type':'number','minimum':0}, 'end': {'type':'number','exclusiveMinimum':0},
+           'budget': {'type':'integer','minimum':2,'maximum':200,'default':12},
+           'seconds': {'type':'number','minimum':1,'maximum':30,'default':8},
+           'mode': {'type':'string','enum':['song','pattern'],'default':'song'},
+           'controls': {'type':'array','minItems':1,'maxItems':16,'items':_obj({
+               'track':{'type':'integer','minimum':0,'maximum':125},
+               'kind':{'type':'string','enum':['volume','pan','stereo','eq','effect']},
+               'band':{'type':'integer','minimum':0,'maximum':2}, 'slot':{'type':'integer','minimum':0,'maximum':9},
+               'param':{'type':'integer','minimum':0}, 'min':{'type':'number'}, 'max':{'type':'number'},
+               'step':{'type':'number','exclusiveMinimum':0,'maximum':.25}}, ['track','kind'])}}, ['reference_path']),
+     lambda s,a:s.recreation.match_mix(**a)),
     ("fl_recreation_config", "Read or configure the complete reconstruction workflow. Register a saved FL Studio 24 "
      "instrument template with five untrimmed playlist clips and one instrument per pattern. Default pattern names: "
      "Full Kick, Full Snare, Full Hat, Full Chords, Full Bass. The template is copied, never modified. No arguments reads configuration.",
@@ -95,6 +118,7 @@ TOOLS = [
      _obj({'path':{'type':'string'}, 'kind':{'type':'string','enum':['auto','song','sound'],'default':'auto'},
            'output_dir':{'type':'string','description':'Absolute parent folder; each task gets its own new subfolder'},
            'tempo_hint':{'type':'number','minimum':30,'maximum':300}, 'render':{'type':'boolean','default':True},
+           'reference_mix':{'type':'boolean','default':True,'description':'After rendering, match reference mix to mixed.wav; dry WAV and FLP retained. Offline DSP is not embedded in FLP.'},
            'start':{'type':'number','minimum':0}, 'end':{'type':'number','exclusiveMinimum':0},
            'channel':CHANNEL, 'params':{'type':'array','items':{'type':'integer','minimum':0}},
            'budget':{'type':'integer','minimum':2,'maximum':200,'default':40},
@@ -163,11 +187,13 @@ TOOLS = [
      _obj({"tracks": {"type": "array", "items": {"type": "integer"}}}), lambda s, a: s.mixer(a.get("tracks"))),
     ("fl_set_mixer", "Set a mixer track's volume (0–1, FL's fader scale) and/or built-in EQ bands "
      "(band 0 low, 1 mid, 2 high; values in FL's normalized units — read fl_get_mixer first and change gradually).",
-     _obj({"track": {"type": "integer"}, "volume": {"type": "number"},
+     _obj({"track": {"type": "integer"}, "volume": {"type": "number", "minimum":0,"maximum":1},
+           "pan": {"type":"number","minimum":-1,"maximum":1},
+           "stereo_separation": {"type":"number","minimum":-1,"maximum":1},
            "eq": {"type": "array", "items": _obj({"band": {"type": "integer"}, "gain": {"type": "number"},
                                                    "freq": {"type": "number"}, "bandwidth": {"type": "number"}}, ["band"])}},
           ["track"]),
-     lambda s, a: s.set_mixer(a["track"], a.get("volume"), a.get("eq"))),
+     lambda s, a: s.set_mixer(a["track"], a.get("volume"), a.get("eq"), a.get("pan"), a.get("stereo_separation"))),
 
     # ---- listening -------------------------------------------------------------------------------------------
     ("fl_listen",

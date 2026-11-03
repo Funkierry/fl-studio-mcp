@@ -382,7 +382,11 @@ def bass_salience(mag_low, sr, n_fft, midi_lo=28, midi_hi=55):
 
 
 def bass_notes(midis, sal, bass_onset, beat_frames, first_beat, n_beats, threshold):
-    """Bass notes on an 8th-note grid for beats [first_beat, first_beat + n_beats), in beats from section start."""
+    """Eighth-note pitch changes and re-attacks, measured separately for each occurrence.
+
+    The 371 ms pitch window cannot reliably resolve sixteenths in a full mix;
+    finer grids increased false notes in independent hit/pitch benchmarks.
+    """
     slots = []
     for bi in range(first_beat, min(first_beat + n_beats, len(beat_frames) - 1)):
         a, b = beat_frames[bi], beat_frames[bi + 1]
@@ -396,21 +400,65 @@ def bass_notes(midis, sal, bass_onset, beat_frames, first_beat, n_beats, thresho
         return []
     # threshold relative to this section as well as the song: quiet verses still have a bass line
     rel = 0.35 * np.percentile([sl[5] for sl in slots], 90)
+    reference = max(np.percentile([sl[5] for sl in slots], 95), dsp.EPS)
+    peaks, _ = signal.find_peaks(bass_onset, distance=max(1, int(FPS*.10)), prominence=.18)
     notes = []
     for bi, half, s, e, seg, strength in slots:
         t = (bi - first_beat) + half / 2
         if strength < min(threshold, rel) or strength < 0.15 * threshold:
             continue
         pitch = int(midis[int(np.argmax(seg.mean(axis=1)))])
-        w = max(2, int((e - s) / 4))
-        onset = bass_onset[max(0, int(s) - w):int(s) + w].max(initial=0) > 0.2
+        w = max(1, (e-s)*.4)
+        onset = bool(np.any(np.abs(peaks-s) <= w))
         if notes and notes[-1]["pitch"] == pitch and not onset and abs(notes[-1]["start"] + notes[-1]["length"] - t) < 1e-6:
             notes[-1]["length"] += 0.5
         else:
-            notes.append({"pitch": pitch, "start": t, "length": 0.5})
+            note_strength = seg.mean(axis=1)
+            ranked = np.sort(note_strength)
+            confidence = float(np.clip(1-ranked[-2]/(ranked[-1]+dsp.EPS), 0, 1))
+            notes.append({"pitch": pitch, "start": t, "length": 0.5,
+                          "velocity": round(float(np.clip(.85*np.sqrt(strength/reference), .25, 1)), 3),
+                          "confidence": round(confidence, 3)})
     for n in notes:
         n["length"] = round(n["length"] * 0.95, 3)
     return notes
+
+
+def drum_events(bands, bar_frames, bars, flux_delay=0.):
+    """Occurrence-local transients; keep fills, accents and sub-grid timing.
+
+    Thresholds are measured per section, but each onset is exported independently.
+    The regular grid is used only to express time, not to average or quantize events.
+    """
+    out = {}
+    for role, env in bands.items():
+        strengths = np.concatenate([_steps(env, bar_frames[b], bar_frames[b+1]) for b in bars])
+        threshold = max(.3, .45*np.percentile(strengths, 95))
+        step_frames = np.median(np.diff(bar_frames))/16
+        peaks, properties = signal.find_peaks(np.r_[0., env, 0.], height=threshold,
+                                              distance=max(1, int(step_frames*.65)), prominence=threshold*.35)
+        peaks = peaks-1
+        events = []
+        reference = max(float(np.percentile(strengths, 95)), dsp.EPS)
+        for bar in bars:
+            a, b = bar_frames[bar:bar+2]
+            for peak in peaks[(peaks >= a-step_frames*.35) & (peaks < b-step_frames*.35)]:
+                # Sub-frame parabolic interpolation of the onset envelope peak.
+                delta = 0.
+                if 0 < peak < len(env)-1:
+                    left, center, right = env[peak-1:peak+2]
+                    delta = float(np.clip(.5*(left-right)/(left-2*center+right+dsp.EPS), -.5, .5))
+                start = max(0., (bar-bars[0])*4+(peak+delta-flux_delay-a)/(b-a)*4)
+                if 0 <= start < len(bars)*4:
+                    strength = float(env[peak])
+                    events.append({'start': round(start, 4), 'length': .125,
+                                   'velocity': round(float(np.clip(.85*np.sqrt(strength/reference), .2, 1)), 3),
+                                   'confidence': round(float(np.clip((strength-threshold)/reference, 0, 1)), 3)})
+        # Keep the existing conservative rejection of isolated pad attacks.
+        if events and len(events) <= len(bars) and all(min(n['start'] % 4, 4-n['start'] % 4) < .15 for n in events):
+            events = []
+        out[role] = events
+    return out
 
 
 # ---------------------------------------------------------------- main entry
@@ -462,11 +510,23 @@ def analyze_song(audio, sr, tempo_hint=None):
     # equal-weight drum bands + harmonic onsets: hats and snares count as much as the kick
     oenv = _normalize(sum(bands.values()) + 0.5 * _normalize(dsp.onset_envelope(harm, SR, N_FFT)))
     tempo, beats, tempo_conf, tempo_alternatives = choose_tempo(oenv, bands, tempo_hint)
-    bands = deleak(bands)
+    # Linear spectral flux preserves the level difference between real hits and
+    # quiet harmonic leakage; log-mel whitening promoted leakage to full hits.
+    frequency = dsp.fft_freqs(SR, N_FFT)
+    detail_bands = {}
+    for name, (lo, hi) in {'kick':(30,130), 'snare':(1400,6000), 'hat':(6500,11000)}.items():
+        spectrum = perc[(frequency >= lo) & (frequency < hi)]
+        flux = np.maximum(0, np.diff(spectrum, axis=1, prepend=spectrum[:, :1])).sum(axis=0)
+        detail_bands[name] = _normalize(flux)
+    detail_bands = deleak(detail_bands)
+    bands = deleak(bands)  # keep robust structure/tempo features independent of hit classification
     beats = extend_beats(beats, tempo, mag)
 
     # downbeat phase: where kicks land and chords change
-    mag_low = dsp.stft_mag(x, N_FFT_LOW, HOP)[:, :mag.shape[1]]
+    # Equal frame centers for both resolutions. Padding on the right alone shifted
+    # bass/chord evidence 139 ms earlier than the drum and beat grid.
+    pad = (N_FFT_LOW-N_FFT)//2
+    mag_low = dsp.stft_mag(np.pad(x, (pad, pad)), N_FFT_LOW, HOP)[:, :mag.shape[1]]
     if mag_low.shape[1] < mag.shape[1]:
         mag_low = np.pad(mag_low, ((0, 0), (0, mag.shape[1] - mag_low.shape[1])))
     # chroma from the high-resolution spectrum (2.7 Hz bins resolve semitones down to the bass register),
@@ -484,7 +544,7 @@ def analyze_song(audio, sr, tempo_hint=None):
     lead_in = phase  # beats before the first downbeat
     beats_db = beats[phase:]
     n_bars = len(beats_db) // 4
-    bar_frames = list(beats_db[:n_bars * 4:4]) + [beats_db[n_bars * 4] if len(beats_db) > n_bars * 4 else beats_db[-1]]
+    bar_frames = list(beats_db[:n_bars * 4:4]) + [beats_db[n_bars * 4] if len(beats_db) > n_bars * 4 else min(mag.shape[1], round(beats_db[-1]+60*FPS/tempo))]
     bar_frames = np.array(bar_frames)
 
     chord_names, chord_roots = recognize_chords(beat_chroma, beat_bass)
@@ -549,6 +609,9 @@ def analyze_song(audio, sr, tempo_hint=None):
         has_bass = np.mean(bar_low[bars_of]) > low_ref - 15
         p["bass"] = bass_notes(sal_midis, sal, bass_onset, beats, first["_first_beat"], first["bars"] * 4, sal_thr) if has_bass else []
     for s in sections:
+        bars_of = s['_bars']
+        s['drum_events'] = drum_events(detail_bands, bar_frames, bars_of, flux_delay=1.)
+        s['bass'] = bass_notes(sal_midis, sal, bass_onset, beats, s['_first_beat'], s['bars']*4, sal_thr) if np.mean(bar_low[bars_of]) > low_ref-15 else []
         s.pop("_bars")
         s.pop("_first_beat")
 
@@ -564,6 +627,8 @@ def analyze_song(audio, sr, tempo_hint=None):
         "bars": int(n_bars),
         "sections": sections,
         "parts": list(parts.values()),
+        "detail_version": 2,
+        "detail_notes": "Each section occurrence retains drum onset timing/velocity and its own eighth-resolution bass; confidence values are heuristic, not calibrated probabilities.",
     }
 
 

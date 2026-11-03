@@ -339,9 +339,9 @@ class SystemLoopbackRecorder:
         return self.audio
 
 
-def fl_recorder(samplerate=SAMPLE_RATE, allow_system_fallback=True):
+def fl_recorder(samplerate=SAMPLE_RATE, allow_system_fallback=True, pid=None):
     """A recorder for FL's audio: process loopback if possible, else (optionally) system loopback."""
-    pid = find_process()
+    pid = pid or find_process()
     if pid is None:
         raise CaptureError("FL Studio (FL64.exe) is not running")
     try:

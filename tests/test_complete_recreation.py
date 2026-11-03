@@ -177,10 +177,23 @@ class PersistentTaskTests(unittest.TestCase):
         s=FLSession();s._recreation=self.manager
         server=McpServer(s)
         names={t['name'] for t in server.handle({'id':1,'method':'tools/list'})['result']['tools']}
-        self.assertTrue({'fl_recreate_music','fl_recreation_status','fl_recreation_config'}<=names)
+        self.assertTrue({'fl_recreate_music','fl_recreation_status','fl_recreation_config','fl_match_mix'}<=names)
         response=server.handle({'id':2,'method':'tools/call','params':{'name':'fl_recreation_config'}})
         self.assertFalse(response['result'].get('isError'))
         self.assertTrue(json.loads(response['result']['content'][0]['text'])['configured'])
+
+    def test_offline_mix_worker_persists_report_without_fl_or_template(self):
+        from fl_studio_mcp.recreation_worker import run
+        manager = Recreation(root=self.root/'mix-data')
+        with patch.object(manager, '_spawn'):
+            state = manager.match_mix(str(self.audio), source_path=str(self.audio), output_dir=str(self.root/'mixed'))
+        with patch('fl_studio_mcp.recreation_worker.running_fl', side_effect=AssertionError('Offline mix must not touch FL')):
+            run(manager._folder(state['task_id']))
+        state = Recreation(root=manager.root).status(state['task_id'])
+        self.assertEqual(state['status'], 'done', state['message'])
+        self.assertTrue(Path(state['artifacts']['audio']).is_file())
+        self.assertTrue(Path(state['artifacts']['mix_report']).is_file())
+        self.assertFalse((manager.root/'recreation.lock').exists())
 
 
 class RenderValidationTests(unittest.TestCase):

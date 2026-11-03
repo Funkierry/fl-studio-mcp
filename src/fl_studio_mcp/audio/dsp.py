@@ -28,6 +28,8 @@ def load_audio(path, sr=None, mono=False, start=None, end=None):
     path = Path(path)
     if not path.exists():
         raise AudioError(f"file not found: {path}")
+    if path.suffix.lower() == '.ncm':
+        raise AudioError('NCM is an encrypted player format; provide a playable WAV, FLAC or MP3 export instead.')
     if path.suffix.lower() == ".wav":
         from scipy.io import wavfile
         file_sr, data = wavfile.read(str(path))

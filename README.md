@@ -3,14 +3,14 @@
 **用自然语言操作 FL Studio，并把参考音频转换成可编辑工程，或在现有插件中搜索接近的音色。**
 
 [![Windows tests](https://github.com/Funkierry/fl-studio-mcp/actions/workflows/tests.yml/badge.svg)](https://github.com/Funkierry/fl-studio-mcp/actions/workflows/tests.yml)
-[![Version](https://img.shields.io/badge/version-0.6.0-blue)](https://github.com/Funkierry/fl-studio-mcp/releases/tag/v0.6.0)
+[![Version](https://img.shields.io/badge/version-0.7.0-blue)](https://github.com/Funkierry/fl-studio-mcp/releases/tag/v0.7.0)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 [下载 Windows EXE](https://github.com/Funkierry/fl-studio-mcp/releases/latest) · [参数示例](examples/) · [报告问题](https://github.com/Funkierry/fl-studio-mcp/issues)
 
 FL Studio MCP 是运行在本机的 Model Context Protocol（MCP）服务器。支持 MCP 的 AI 客户端负责理解你的话，再通过本项目读取工程、写鼓点、控制插件、录制试听并分析结果。它本身不需要模型 API Key，也不内置大语言模型。
 
-当前版本 **0.6.0** 提供 **31 个工具**。完整还原任务使用独立后台进程，工具连接关闭后仍可继续运行；重连后可查询进度和结果。
+当前版本 **0.7.0** 提供 **32 个工具**。支持逐段演奏细节保留、参考音频混音，以及实际 FL 混音器参数搜索。完整还原与混音任务使用独立后台进程，工具连接关闭后仍可继续运行；重连后可查询进度和结果。
 
 > **当前“整曲还原”的含义**：根据参考音频，近似重建 4/4 拍音乐的鼓、三和弦、低音和段落，再通过你准备的乐器模板生成 FLP、MIDI 和 WAV。当前不包含人声分离、独立主旋律转录、逐轨音色自动匹配或一比一成品复刻。
 
@@ -20,6 +20,7 @@ FL Studio MCP 是运行在本机的 Model Context Protocol（MCP）服务器。�
 - [2. 环境与兼容性](#requirements)
 - [3. 安装与首次连接](#install)
 - [4. 完整音乐还原](#song)
+- [4.6 参考混音：音频处理与 FL 实际调参](#mix)
 - [5. 单音色还原](#sound)
 - [6. 日常编曲与试听](#arrange)
 - [7. 工具与参数参考](#tools)
@@ -37,6 +38,8 @@ FL Studio MCP 是运行在本机的 Model Context Protocol（MCP）服务器。�
 | --- | --- | --- | --- |
 | 完整音乐还原 | 本地音频 + FL 24 乐器模板 | 新 FLP、完整 MIDI、渲染 WAV、A/B 音频、验证报告 | 生成文件时不需要；原生渲染前须关闭 |
 | 单音色还原 | 干净的单音参考 + 插件通道 | 自动试听调参，保存参考/原始/最佳音频及参数 | 需要，且停止播放 |
+| 离线参考混音 | 参考音频 + 已有渲染音频 | 实际处理后的 WAV、可重放 DSP 配方、前后指标与三段对比 | 不需要 |
+| FL 实时参考混音 | 参考片段 + 已有 Mixer/FX 控件 | 搜索并保留最佳实际参数，保存精确恢复值 | 需要，且测试期间不要手动播放或改参数 |
 | 音频分析 | 歌曲或单音文件 | 速度、调性、段落、和弦、鼓/低音估计，或音高与音色特征 | 不需要 |
 | 实时编曲 | 自然语言或音符/鼓型参数 | 步进鼓、钢琴卷帘待写音符、Pattern、速度、混音参数 | 需要 |
 | 听觉诊断 | 当前工程或参考音频 + “太闷/太浑”等描述 | 响度、频段、明亮度等测量及可调参数建议 | 需要 |
@@ -96,7 +99,7 @@ Set-Location E:\Tools\fl-studio-mcp
 .\fl-studio-mcp.exe doctor --json
 ```
 
-正常状态应显示服务器版本 `0.6.0`、桥接版本 `7`、`connection.state = connected`。FL 未打开时，离线分析仍可用，但实时诊断会报告未连接。
+正常状态应显示服务器版本 `0.7.0`、桥接版本 `8`、`connection.state = connected`。升级 EXE 后请再次运行 `install`，并在 FL 中更新 MIDI 脚本。FL 未打开时，离线分析与离线混音仍可用，但实时诊断会报告未连接。
 
 其他安装选项：
 
@@ -282,14 +285,92 @@ E:/FL-MCP/recreations/recreate-<id>/
 ├── arrangement.mid                         # 可编辑 MIDI
 ├── recreated.flp                           # 带模板乐器和播放列表的新工程
 ├── recreated.wav                           # FL 原生导出音频
+├── mixed.wav                               # 默认启用：参考混音后的最终音频
+├── mix-report.json                         # EQ/动态/立体声/空间配方及前后指标
+├── mix-comparison.wav                      # 参考 → 原始渲染 → 参考混音，各最多 16 秒
 ├── comparison-reference-then-recreated.wav  # 参考 → 0.75 秒静音 → 还原片段
 ├── verification.json                       # 完整性、响度与频段差异报告
 └── render.log                              # 原生渲染进程输出，可能为空
 ```
 
-A/B 通常选取副歌或首段，双方各最多 16 秒，以 RMS **衰减**方式匹配音量。它是片段对比，不是完整歌曲交替播放；完整结果在 `recreated.wav`。
+原生渲染 A/B 通常选取副歌或首段，双方各最多 16 秒，以 RMS **衰减**方式匹配音量。混音对比取开头各最多 16 秒；完整结果在 `mixed.wav`，原生渲染仍保留为 `recreated.wav`。设置 `reference_mix: false` 可跳过额外混音。
 
 工具核验时长、数值有效性、非静音、分段能量与削波。削波和近静音段落会返回警告。报告反映输出是否完整可用，**不是音符正确率或人耳相似度评分**。
+
+0.7.0 修正了不同 STFT 窗口之间约 139 ms 的时间错位。完整 FLP/MIDI 导出保留每次段落出现时独立检测的鼓点、亚网格起音、力度和贝斯，不再把同名段落全部替换为平均鼓型和第一段贝斯。低音仍采用八分音符网格；实验中直接加密为十六分音符增加了误检，因此未作为默认算法发布。旧分析文件仍可读取，缺少细节字段时使用旧的重复鼓型。
+
+<a id="mix"></a>
+### 4.6 参考混音：音频处理与 FL 实际调参
+
+这两种模式解决不同的工作环节：离线模式直接改变最终音频；实时模式通过 FL 原有的混音器和插件处理音频，参数可以在工程内继续编辑。两者都使用 `fl_match_mix`，返回 `task_id` 后用 `fl_recreation_status` 查询。
+
+#### A. 对已有音频进行参考混音
+
+```json
+{
+  "reference_path": "E:/Music/reference.wav",
+  "source_path": "E:/Music/my-render.wav",
+  "output_dir": "E:/FL-MCP/mix-results"
+}
+```
+
+无需启动 FL，也不需要注册模板。原始文件不会被覆盖。输出 `reference.wav`、`before.wav`、`mixed.wav`、`mix-report.json`、`mix-comparison.wav`。参考和待处理音频应尽量是同一段音乐；如果一个是整曲、另一个只有副歌，指标可能反映编曲差异而非混音差异。`start/end` **只截取参考音频**；需要截取待处理音频时先导出对应片段。
+
+处理与选择过程：
+
+1. 以左右声道功率测量频谱，避免反相内容在转单声道时被抵消；同时测量 LUFS、峰均比、动态范围、声像偏差、M/S 宽度和衰减代理指标。
+2. 尝试平滑的 10 点宽频 EQ 曲线，修正限制在 ±6 dB，不给几乎无内容的频段大幅补能量；FIR 延迟补偿后保持原时间轴。
+3. 搜索有限的双声道联动压缩、M/S 宽度与左右平衡；参考更有尾音或更宽时，尝试少量确定性立体声反射。它不宣称识别出了原曲的混响插件或房间。
+4. 用分布在开头、中间和末尾的片段筛选，再在完整音频上复核。完整音频的综合距离未改善时舍弃候选，只保留峰值保护。
+5. 增益调整限制为 ±12 dB，最终以 4 倍过采样估计峰值并衰减到不高于 **−1 dBTP**，不使用硬削波来强行追响度。报告会显示仍然存在的响度差距。
+
+`mix-report.json` 的 `recipe` 可以通过 Python 重放：
+
+```python
+import json
+from fl_studio_mcp.audio import dsp, mixing
+
+audio, sr = dsp.load_audio("my-render.wav")
+report = json.load(open("mix-report.json", encoding="utf-8"))
+mixed = mixing.process(audio, sr, report["recipe"])
+dsp.save_wav("replayed.wav", mixed, sr)
+```
+
+必须使用同一输入和采样率；配方保存的是本工具 DSP 参数，**不是 FL 插件预设，也不会自动写入 FLP**。只重新播放 `recreated.flp` 听到的是模板混音；要听离线处理结果请使用 `mixed.wav`，或导入 FL 的 Audio Clip。
+
+#### B. 在 FL 中匹配实际混音参数
+
+先打开有内容的工程并停止播放，调用 `fl_get_mixer` 检查轨道、EQ 和已加载的效果器。未给 `source_path` 时，工具录制当前工程并优化指定控件：
+
+```json
+{
+  "reference_path": "E:/Music/reference-first-8s.wav",
+  "mode": "song",
+  "seconds": 8,
+  "budget": 12,
+  "controls": [
+    {"track": 0, "kind": "eq", "band": 0, "min": 0.35, "max": 0.65, "step": 0.06},
+    {"track": 0, "kind": "eq", "band": 1, "min": 0.35, "max": 0.65, "step": 0.06},
+    {"track": 0, "kind": "eq", "band": 2, "min": 0.35, "max": 0.65, "step": 0.06}
+  ]
+}
+```
+
+不传 `controls` 使用上面的 Master 三段 EQ 范围。若当前值不在范围内，任务会在改参数前报错；请读回当前值后调整范围。每轮从头播放当前 Song 或 Pattern，录制 `seconds` 秒（1–30），`budget` 是总评估次数（含基线，2–200）。参考前 `seconds` 秒必须与这段播放相对应；不要在搜索时同时手动播放、改参数或启动其他试听任务。
+
+| `kind` | 额外字段 | 数值含义 |
+| --- | --- | --- |
+| `volume` | 无 | 轨道音量，FL 推子归一化 0–1，不是 dB |
+| `pan` | 无 | 左右声像 −1–1 |
+| `stereo` | 无 | FL stereo separation −1–1；不是离线 M/S 倍率 |
+| `eq` | `band`: 0/1/2 | 内置低/中/高 EQ 增益，FL 归一化 0–1 |
+| `effect` | `slot`, `param` | 已有混音效果器参数，槽位从 0 开始，数值 0–1 |
+
+每项还包含 `track`、`min`、`max`、`step`（>0 且 ≤0.25）；最多 16 项。要优化已加载压缩器或混响，先用 `fl_list_params(mixer_track=..., slot=...)` 查真实参数编号，再选择 `kind: "effect"`。工具不猜测编号，不自动安装或替换效果器。归一化范围与声音大小不一定线性，建议小步搜索。
+
+搜索前先保存 `mixer-revert.json`，再修改 FL；每次写入后读回核验。成功时保留最佳参数，结果含 `best_settings` 与 `revert`。**请在 FL 中保存工程，才能把这些设置持久保存到 FLP。** 取消或异常会恢复原始值；若连接中断导致恢复无法确认，任务明确报错，检查 `mixer-journal.json`，按 `mixer-revert.json` 用 `fl_set_mixer` / `fl_set_params` 恢复。程序突然被强制结束时无法保证执行恢复，所以磁盘上的恢复文件很重要。
+
+混音距离综合频谱、响度、动态、立体声和衰减代理指标，**不是“还原度百分比”**。不同音源、演奏、主旋律或人声缺失，无法通过总线 EQ 和压缩补回来；压缩与混响也无法从最终成品唯一反推出原始链路。请结合音量匹配的三段音频试听。
 
 <a id="sound"></a>
 ## 5. 单音色还原
@@ -403,6 +484,7 @@ A/B 通常选取副歌或首段，双方各最多 16 秒，以 RMS **衰减**方
 | `start`, `end` | 起点 0，终点文件结尾 | 秒；要求 `0 <= start < end` |
 | `tempo_hint` | 可选，30–300 | 歌曲 BPM 提示，用于纠正半速/倍速估计 |
 | `render` | `true` | 仅歌曲使用；`false` 只生成工程和 MIDI |
+| `reference_mix` | `true` | 歌曲渲染后生成参考混音 WAV；`false` 保留原生渲染即可 |
 | `channel` | 音色模式必填 | 当前 FL 插件通道编号，从 0 开始 |
 | `params` | 可选 | 要搜索的非负整数参数编号数组 |
 | `budget` | 40，范围 2–200 | 音色试听次数 |
@@ -419,7 +501,7 @@ A/B 通常选取副歌或首段，双方各最多 16 秒，以 RMS **衰减**方
 | `cancel` | `false` | 请求取消，保留已有文件 |
 | `resume` | `false` | 继续 `waiting_fl_close` 任务；不能与 `cancel` 同时使用 |
 
-### 7.2 全部 31 个工具
+### 7.2 全部 32 个工具
 
 | 工具 | 用途 |
 | --- | --- |
@@ -443,7 +525,8 @@ A/B 通常选取副歌或首段，双方各最多 16 秒，以 RMS **衰减**方
 | `fl_rename_channel` | 重命名通道 |
 | `fl_undo` | 请求 FL 撤销 |
 | `fl_get_mixer` | 读混音路由、音量、EQ 与效果器槽 |
-| `fl_set_mixer` | 设置混音音量和内置 EQ |
+| `fl_set_mixer` | 设置混音音量、声像、立体声分离和内置 EQ |
+| `fl_match_mix` | 持久化参考混音：已有音频 DSP 或实际 FL Mixer/FX 搜索，参数详见 4.6 |
 | `fl_listen` | 录制实际播放并分析 |
 | `fl_diagnose` | 核实听感问题并给出调整目标 |
 | `fl_analyze_audio` | 离线分析歌曲或单音 |
@@ -523,6 +606,8 @@ flowchart TD
     E --> F[模板编辑器生成 FLP 与 MIDI]
     F --> G[FL 原生命令行渲染]
     G --> H[完整性验证与 A/B 音频]
+    H --> N[参考混音 DSP 与全曲复核]
+    N --> O[混音 WAV / 配方 / 三段对比]
     D -->|音色| I[搜索插件参数]
     B --> J[实时工程控制]
     I --> K[WinMM / loopMIDI / FL Bridge]
@@ -551,6 +636,7 @@ FL 的实时脚本接口不能覆盖所有播放列表和音符编辑需求，�
 | 模板验证失败 | 使用 FL 24；五个角色对应不同 Pattern 和通道，每个含音符；片段未裁切、同一 Arrangement，且无 Pattern 自动化 |
 | 输出静音或渲染失败 | 手动打开生成的 FLP，检查插件/采样是否缺失、音源是否发声及导出对话框；查看 `worker.log` 与 `render.log` |
 | MP3 读取失败 | 确认 `ffmpeg -version` 可执行，或先转成 WAV |
+| NCM 读取失败 | NCM 是播放器加密格式，不能仅改扩展名；请提供可读取的 WAV、FLAC 或 MP3 导出。程序不会修改原文件 |
 | 无法录制 FL 声音 | 检查系统是否支持进程回环、FL 是否确实发声；可选系统回环会混入其他应用，必须单独判断录音来源 |
 | 速度变成一半/两倍 | 显式传入正确的 `tempo_hint`；复杂混音可能出现节拍层级歧义 |
 | 音色搜索改善很小 | 确认参考是单音、通道与参数正确、起始插件合理；尝试更合适的预设/更多有效参数，而不是只增加次数 |
@@ -605,6 +691,7 @@ python -m pip wheel --no-deps --wheel-dir dist .
 ```powershell
 python tests/make_samples.py
 python tests/evaluate.py
+python tests/benchmark_detail.py --baseline --output detail-benchmark.json
 ```
 
 生成器创建带标准答案的测试素材，包括 120 BPM 流行、124 BPM house、85 BPM lo-fi、单音 bass/pluck/pad/lead 及明暗 lead 对比。文件写入 `samples/`，默认不提交 Git。评测用于研究分析误差，不能代替真实商业混音上的广泛评估。
@@ -636,7 +723,27 @@ python scripts/build_exe.py --dist-dir E:\FL-MCP\release --work-dir E:\FL-MCP\bu
 <a id="validation"></a>
 ## 12. 验证结果与能力边界
 
-0.6.0 在开发机器的 FL Studio 24.2.1 上完成了以下验证：
+0.7.0 的测量方法、比较基线与剩余误差：
+
+| 合成素材 | Kick F1（0.6 → 0.7） | Snare F1 | Hat F1 | Bass 音高+起音 F1 |
+| --- | --- | --- | --- | --- |
+| Pop 120 BPM | 1.000 → 1.000 | 0.471 → 0.977 | 0.857 → 0.867 | 0.678 → 0.980 |
+| House 124 BPM | 0.333 → 0.995 | 0.400 → 0.970 | 0.727 → 0.848 | 0.238 → 0.342 |
+| Lo-fi 85 BPM | 0.476 → 1.000 | 0.889 → 1.000 | 0.837 → 0.918 | 0.810 → 0.875 |
+
+`benchmark_detail.py --baseline` 从 Git 的 `v0.6.0` 读取旧算法，并与当前代码处理相同测试音频；不切换工作区。逐音符一对一匹配，容差 0.1 拍，Bass 还必须音高一致。F1 同时惩罚误检与漏检，不把大量休止格当作识别正确。数据来自三首合成素材，不代表真实曲库的泛化表现；House 反拍低音仍然明显不准。完整数值见 [验证数据](docs/validation-v0.7.0.json)。原 `evaluate.py` 的鼓格准确率是另一种指标，不能与这里的 F1 混用。
+
+修正分析窗口对齐后，原和弦评测 Pop 从 98% 到 100%、House 从 75% 到 79%，Lo-fi 保持 85%。这一评测仍只检查三和弦标签，不验证转位与扩展和弦。
+
+离线混音已经用实际 FL 导出的约 80 秒 Pop WAV 跑通：完整音频的综合特征距离由 **4.905 降至 2.919**，4 倍过采样峰值约 **−1.83 dBTP**，保存了实际 `mixed.wav`、配方和对比音频。此数据评估的是在已有渲染上的混音修正，不能解释为整曲相似度达到某个百分比。
+
+离线自动测试覆盖已知 EQ/音量/声像偏差的改善、同参考不劣化、反相立体声、过采样峰值、DSP 重放、细节保留、Pop 独立标准答案、实时写入失败/取消恢复、持久化混音 worker。CI 的模拟 FL 测试不替代实机验证。
+
+本次 **85 项离线测试**在两组依赖环境中通过；发布 EXE 的 stdio 初始化报告 0.7.0、32 个工具。关闭提交请求的父 EXE 后，独立混音 worker 仍完成任务；新版整曲文件导出也生成了 40 小节、814 音符的 FLP/MIDI，文件内音符计数与分析一致。
+
+**0.7.0 实时混音暂列实验功能**：模拟 FL 的成功、异常和取消恢复测试已通过；开发机此次实际 FL 连接被重复 MIDI 输出端口配置阻断，尚未完成新版实时混音或新版工程原生渲染验证。下面的 0.6.0 实机结果不替代这项验证。实时混音拒绝系统全局录音回退，以避免其他播放器声音参与评分。
+
+以下为 0.6.0 已完成的 FL Studio 24.2.1 集成验证历史，保留用于区分新算法测试与旧版实机结果：
 
 | 检查 | 已观察结果 |
 | --- | --- |

@@ -25,7 +25,7 @@ class DiagnosticTests(unittest.TestCase):
             stack.enter_context(patch.object(diagnostics.paths, name, return_value=Path(__file__)))
         stack.enter_context(patch.object(Path, "is_dir", return_value=True))
         self.session = FLSession()
-        self.session._call = Mock(return_value={"bridge_version": 7, "tempo": 130})
+        self.session._call = Mock(return_value={"bridge_version": 8, "tempo": 130})
 
     def test_connected_report_contains_runtime_identity(self):
         status = self.session.status()

@@ -20,7 +20,7 @@ class Listener:
         seconds = float(max(1.0, min(seconds, 60.0)))
         soloed = False
         state = None
-        rec = fl_recorder()
+        rec = fl_recorder(pid=self.session.info().get('process_id'))
         try:
             if channel is not None:
                 self.session._call("solo", channel=channel, on=True)
@@ -35,7 +35,8 @@ class Listener:
                 if soloed:
                     self.session._call("solo", channel=channel, on=False)
         audio = dsp.trim_to_onset(audio, rec.sr, threshold_db=-50)
-        info = {"capture": rec.kind, "seconds": round(len(audio) / rec.sr, 2), "mode": mode, "channel": channel}
+        info = {"capture": rec.kind, "process_id": getattr(rec, 'pid', None),
+                "seconds": round(len(audio) / rec.sr, 2), "mode": mode, "channel": channel}
         if np.abs(audio).max() < 1e-4:
             info["silent"] = True
         info["wav"] = self.store.save_audio(audio, rec.sr, f"listen_{mode}" + (f"_ch{channel}" if channel is not None else ""))
@@ -43,7 +44,7 @@ class Listener:
 
     def render_note(self, channel, pitch, length_s=0.8, velocity=100, tail_s=0.7):
         """Play one note through the channel's plugin and record it."""
-        rec = fl_recorder()
+        rec = fl_recorder(pid=self.session.info().get('process_id'))
         try:
             self.session._call("play", channel=channel, events=[
                 {"pitch": int(pitch), "at_ms": 0, "len_ms": length_s * 1000, "velocity": int(velocity)}])

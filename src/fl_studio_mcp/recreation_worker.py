@@ -12,7 +12,7 @@ import traceback
 import numpy as np
 from scipy.io import wavfile
 
-from .audio import dsp, perception, song
+from .audio import dsp, perception, song, mixing
 from .errors import FLError
 from .recreation import Recreation, atomic_json, hidden_process_options, read_json, running_fl
 
@@ -166,9 +166,43 @@ def run(folder):
                 kind = 'song' if duration >= 20 else 'sound'
             state['kind'] = kind
             reference = output/'reference.wav'
-            dsp.save_wav(reference,audio,sr)
+            wavfile.write(reference, sr, audio.astype(np.float32))
             state['artifacts']['reference'] = str(reference)
             cancelled()
+            if kind == 'mix':
+                update('mix', .1, 'Matching reference mix')
+                if request.get('source_path'):
+                    dry, _ = dsp.load_audio(request['source_path'], sr=sr)
+                    if not .1 <= len(dry)/sr <= 600:
+                        raise FLError('Mix source must be between 0.1 and 600 seconds')
+                    mixed, matched = mixing.fit(audio, dry, sr,
+                        progress=lambda count, score: update('mix', min(.85, .1+count*.06), f'Mix candidate {count}: distance {score:.3f}'),
+                        cancelled=cancelled)
+                    cancelled()
+                    wavfile.write(output/'before.wav', sr, dry.astype(np.float32))
+                    dsp.save_wav(output/'mixed.wav', mixed, sr)
+                    matched['comparison'] = mixing.save_comparison(audio, dry, mixed, sr, output/'mix-comparison.wav')
+                else:
+                    from .mix_match import fit_live
+                    from .tools import FLSession
+                    from .midi_transport import DEFAULT_IN_PORT, DEFAULT_OUT_PORT
+                    session = FLSession(request.get('out_port') or DEFAULT_OUT_PORT, request.get('in_port') or DEFAULT_IN_PORT)
+                    try:
+                        matched = fit_live(session, audio, sr, output, controls=request['controls'],
+                            budget=request['budget'], seconds=request['seconds'], mode=request['mode'],
+                            progress=lambda count, score: update('mix', .1+.8*count/request['budget'], f'Live mix evaluation {count}: distance {score:.3f}'),
+                            cancelled=cancelled)
+                    finally:
+                        session.close()
+                atomic_json(output/'mix-report.json', matched)
+                state['artifacts'].update(audio=str(output/'mixed.wav'), before=str(output/'before.wav'),
+                    mix_report=str(output/'mix-report.json'), comparison=matched['comparison']['path'])
+                if (output/'mixer-revert.json').exists():
+                    state['artifacts']['mixer_revert'] = str(output/'mixer-revert.json')
+                state['result'] = matched
+                state.update(status='done', phase='complete', progress=1, message='Reference mix matching complete', updated=time.time())
+                atomic_json(folder/'state.json', state)
+                return
             if kind == 'sound':
                 if request['channel'] is None:
                     raise FLError('Short audio was classified as sound; provide a live FL plugin channel or set kind=song')
@@ -276,9 +310,24 @@ def run(folder):
         if report is None:
             report = verify_audio(output/'reference.wav',rendered,arrangement,output)
         state['artifacts'].update(audio=str(rendered),verification=str(output/'verification.json'),comparison=report['comparison']['path'])
+        if request.get('reference_mix', True):
+            update('mix', .94, 'Matching rendered audio to reference tone, dynamics and stereo image')
+            reference_audio, rate = dsp.load_audio(output/'reference.wav', sr=44100)
+            dry, _ = dsp.load_audio(rendered, sr=rate)
+            offset = round(arrangement.get('first_downbeat_s', 0)*rate)
+            reference_audio = reference_audio[offset:offset+len(dry)]
+            mixed, mix_report = mixing.fit(reference_audio, dry, rate, cancelled=cancelled)
+            cancelled()
+            dsp.save_wav(output/'mixed.wav', mixed, rate)
+            mix_report['comparison'] = mixing.save_comparison(reference_audio, dry, mixed, rate, output/'mix-comparison.wav')
+            atomic_json(output/'mix-report.json', mix_report)
+            state['artifacts'].update(dry_audio=str(rendered), audio=str(output/'mixed.wav'),
+                                      mix_report=str(output/'mix-report.json'), comparison=mix_report['comparison']['path'])
         state['result'] = {'bars':arrangement['bars'],'tempo_bpm':arrangement['tempo_bpm'],
                            'duration_s':report['duration_s'],'notes':arrangement['note_counts'],
                            'checks':report['checks'],'warnings':report['warnings'],'limitations':report['limitations']}
+        if request.get('reference_mix', True):
+            state['result']['mix'] = {key: mix_report[key] for key in ('distance_before', 'distance_after', 'true_peak_dbtp', 'limitations')}
         state.update(status='done',phase='complete',progress=1,message='FL project, MIDI, WAV and A/B comparison ready',updated=time.time())
         atomic_json(folder/'state.json',state)
     except Cancelled:
@@ -289,6 +338,11 @@ def run(folder):
         state.update(status='error',message=f'{type(exc).__name__}: {exc}',updated=time.time())
         atomic_json(folder/'state.json',state)
     finally:
+        if (output/'mixer-revert.json').exists():
+            state['artifacts']['mixer_revert'] = str(output/'mixer-revert.json')
+            if (output/'mixer-journal.json').exists():
+                state['artifacts']['mixer_journal'] = str(output/'mixer-journal.json')
+            atomic_json(folder/'state.json', state)
         (folder/'resume.lock').unlink(missing_ok=True)
         if state['status'] in ('done','error','cancelled'):
             manager._unlock(task_id)

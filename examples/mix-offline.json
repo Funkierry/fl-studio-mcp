@@ -1,0 +1,5 @@
+{
+  "reference_path": "E:/Music/reference.wav",
+  "source_path": "E:/Music/my-render.wav",
+  "output_dir": "E:/FL-MCP/mix-results"
+}

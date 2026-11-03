@@ -149,13 +149,32 @@ class Recreation:
             lock.unlink(missing_ok=True)
 
     def start(self, path, kind='auto', output_dir=None, tempo_hint=None, render=True,
-              start=None, end=None, channel=None, params=None, budget=40, pitch=None, note_len_s=None):
+              start=None, end=None, channel=None, params=None, budget=40, pitch=None, note_len_s=None,
+              reference_mix=True, source_path=None, controls=None, seconds=8., mode='song'):
         from .tools import _finite_number, parse_pitch
-        if kind not in ('auto','song','sound') or not isinstance(render, bool):
+        if kind not in ('auto','song','sound','mix') or not isinstance(render, bool):
             raise FLError('kind must be auto, song or sound; render must be boolean')
         source = Path(path).resolve(strict=True)
         if not source.is_file():
             raise FLError('path must point to an audio file')
+        if source.suffix.lower() == '.ncm':
+            raise FLError('NCM is an encrypted player format. Provide a playable WAV, FLAC or MP3 export; the original file is not modified.')
+        if type(reference_mix) is not bool:
+            raise FLError('reference_mix must be boolean')
+        if source_path is not None:
+            source_path = str(Path(source_path).resolve(strict=True))
+            if not Path(source_path).is_file() or Path(source_path).suffix.lower() == '.ncm':
+                raise FLError('source_path must be a readable audio file (not NCM)')
+        if kind == 'mix':
+            from .mix_match import validate_controls
+            if source_path is not None and controls is not None:
+                raise FLError('controls are for live FL mixing; omit source_path to use them')
+            controls = validate_controls(controls) if source_path is None else None
+            seconds = _finite_number(seconds, 'seconds')
+            if not 1 <= seconds <= 30 or mode not in ('song', 'pattern'):
+                raise FLError('seconds must be 1..30 and mode song or pattern')
+        elif source_path is not None or controls is not None:
+            raise FLError('source_path and controls belong to fl_match_mix')
         start = 0.0 if start is None else _finite_number(start, 'start')
         end = None if end is None else _finite_number(end, 'end')
         if start < 0 or end is not None and end <= start:
@@ -193,6 +212,8 @@ class Recreation:
         request = {'path':str(source), 'kind':kind, 'output_dir':str(output), 'tempo_hint':tempo_hint,
                    'render':render, 'start':start, 'end':end, 'channel':channel, 'params':params,
                    'budget':budget, 'pitch':pitch, 'note_len_s':note_len_s, 'config':config,
+                   'reference_mix':reference_mix, 'source_path':source_path, 'controls':controls,
+                   'seconds':seconds, 'mode':mode,
                    'out_port':getattr(self.session,'out_port',None), 'in_port':getattr(self.session,'in_port',None)}
         atomic_json(folder/'request.json', request)
         atomic_json(folder/'state.json', {'task_id':task_id,'status':'queued','phase':'queued','progress':0,
@@ -208,6 +229,12 @@ class Recreation:
             self._unlock(task_id)
             raise
         return self.status(task_id)
+
+    def match_mix(self, reference_path, source_path=None, output_dir=None, start=None, end=None,
+                  controls=None, budget=12, seconds=8., mode='song'):
+        """Offline audio when source_path is supplied, otherwise the live FL mixer."""
+        return self.start(reference_path, kind='mix', source_path=source_path, output_dir=output_dir,
+                          start=start, end=end, controls=controls, budget=budget, seconds=seconds, mode=mode)
 
     def _spawn(self, folder):
         if getattr(sys, 'frozen', False):

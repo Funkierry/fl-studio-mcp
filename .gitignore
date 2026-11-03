@@ -22,6 +22,10 @@ exports/
 *.flp
 *.wav
 *.mp3
+*.flac
+*.ncm
+*.m4a
+*.mp4
 *.mid
 *.log
 *.exe

@@ -7,7 +7,7 @@ from . import __version__, paths
 from .errors import FLError
 from .midi_transport import list_ports
 
-MIN_BRIDGE_VERSION = 7
+MIN_BRIDGE_VERSION = 8
 
 
 def saved_midi_settings(out_port, in_port):

@@ -27,6 +27,13 @@ def arrangement_notes(analysis, labels=None):
             raise FLError('Invalid section length or position')
         sections.append(section)
         for role, pitch in DRUMS.items():
+            if 'drum_events' in section:
+                for note in section['drum_events'].get(role, []):
+                    start = note['start']
+                    duration = min(note['length'], length-start)
+                    if 0 <= start < length and duration > 0:
+                        notes[role].append(dict(note, pitch=pitch, start=offset+start, length=duration))
+                continue
             groove = ''.join(c for c in part['drums'].get(role, '') if not c.isspace() and c != '|')
             if groove and (len(groove) != 16 or any(c not in 'xXo.' for c in groove)):
                 raise FLError(f'Expected a 16-step drum groove for {role}')
@@ -47,9 +54,9 @@ def arrangement_notes(analysis, labels=None):
                 notes['chords'].append({'pitch': pitch, 'start': offset+start,
                                         'length': end-start, 'velocity': .7})
         # Bass is estimated for one representative part. Repeat or trim it to the occurrence length.
-        cycle = part['bars']*4
+        cycle = length if 'bass' in section else part['bars']*4
         for repeat in range(math.ceil(length/cycle)):
-            for note in part['bass']:
+            for note in section.get('bass', part['bass']):
                 start = repeat*cycle + note['start']
                 duration = min(note['length'], length-start, (repeat+1)*cycle-start)
                 if 0 <= start < length and duration > 0:
@@ -102,6 +109,6 @@ def export_arrangement(analysis, destination, labels=None):
             'sections': [{'label': s['label'], 'bar': s['start_bar'], 'bars': s['bars']} for s in sections],
             'alignment': 'First detected downbeat is bar 0; initial audio lead-in is omitted.',
             'limitations': ['4/4 is assumed; chords are triads.',
-                           'Drum grooves and representative bass lines repeat; detailed fills may be missing.',
+                           'New analyses preserve occurrence-specific drum timing/velocity and bass; legacy analyses use repeated grooves.',
                            'This contains MIDI notes and structure, not separated stems or original instrument presets.'],
             'next': 'Import the MIDI in FL Studio and assign your drum samples, chord instrument and bass plugin.'}

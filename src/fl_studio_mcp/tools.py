@@ -224,8 +224,28 @@ class FLSession:
     def mixer(self, tracks=None):
         return self._call("mixer", tracks=tracks) if tracks else self._call("mixer")
 
-    def set_mixer(self, track, volume=None, eq=None):
-        return self._call("mixer_set", track=track, volume=volume, eq=eq or [])
+    def set_mixer(self, track, volume=None, eq=None, pan=None, stereo_separation=None, undo=True):
+        if type(track) is not int or not 0 <= track <= 125:
+            raise FLError('track must be an integer from 0 to 125')
+        args = {'volume': volume, 'pan': pan, 'stereo_separation': stereo_separation}
+        for name, value in args.items():
+            if value is not None:
+                value = _finite_number(value, name)
+                if not (0 if name == 'volume' else -1) <= value <= 1:
+                    raise FLError(f'{name} is outside its normalized range')
+                args[name] = value
+        bands = []
+        for item in eq or []:
+            band = dict(item)
+            if type(band.get('band')) is not int or not 0 <= band['band'] <= 2:
+                raise FLError('EQ band must be 0, 1 or 2')
+            for name in ('gain', 'freq', 'bandwidth'):
+                if band.get(name) is not None:
+                    band[name] = _finite_number(band[name], name)
+                    if not 0 <= band[name] <= 1:
+                        raise FLError(f'EQ {name} must be between 0 and 1')
+            bands.append(band)
+        return self._call('mixer_set', track=track, eq=bands, undo=undo, **args)
 
     def audition(self, channel, notes, bpm=None):
         notes = normalize_notes(notes)

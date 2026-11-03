@@ -33,7 +33,7 @@ import plugins
 import transport
 import ui
 
-VERSION = 7
+VERSION = 8
 DATA_DIR = os.path.join(os.path.expanduser("~"), "Documents", "FLAgent")
 HEADER = bytes([0xF0, 0x7D, 0x46, 0x42])  # 'FB': protocol v5 (with client id)
 PARTIAL_TTL_S = 10.0
@@ -166,6 +166,7 @@ def cmd_info(args):
         "fl_version": _safe(ui.getVersion),
         "api_version": _safe(general.getVersion),
         "bridge_version": VERSION,
+        "process_id": _safe(os.getpid),
         "python": sys.version,
         "tempo": _safe(_tempo),
         "ppq": _safe(general.getRecPPQ),
@@ -292,10 +293,12 @@ EQ_FUNCS = ("getEqGain", "setEqGain", "getEqFrequency", "setEqFrequency", "getEq
 
 def _track_info(t):
     info = {"track": t, "name": _safe(mixer.getTrackName, t), "volume": _safe(mixer.getTrackVolume, t),
+            "pan": _safe(mixer.getTrackPan, t), "stereo_separation": _safe(mixer.getTrackStereoSep, t),
             "effects": []}
     if hasattr(mixer, "getEqGain"):
         info["eq"] = [{"band": b, "gain": _safe(mixer.getEqGain, t, b),
-                       "freq": _safe(mixer.getEqFrequency, t, b) if hasattr(mixer, "getEqFrequency") else None}
+                       "freq": _safe(mixer.getEqFrequency, t, b) if hasattr(mixer, "getEqFrequency") else None,
+                       "bandwidth": _safe(mixer.getEqBandwidth, t, b) if hasattr(mixer, "getEqBandwidth") else None}
                       for b in range(3)]
     for slot in range(10):
         if _safe(plugins.isValid, t, slot, default=False) is True:
@@ -323,6 +326,10 @@ def cmd_mixer_set(args):
     before = _track_info(t)
     if args.get("volume") is not None:
         mixer.setTrackVolume(t, float(args["volume"]))
+    if args.get('pan') is not None:
+        mixer.setTrackPan(t, float(args['pan']))
+    if args.get('stereo_separation') is not None:
+        mixer.setTrackStereoSep(t, float(args['stereo_separation']))
     for eq in args.get("eq", []):
         b = int(eq["band"])
         if eq.get("gain") is not None:
